@@ -1,0 +1,8 @@
+# Ignore all files
+*
+
+# Except
+!.gitignore
+!README.md
+!/lib
+!/lib/interp.ml
