@@ -4,35 +4,35 @@
  *)
 
 (* Raised when a function body terminates without executing `return`.
-*)
+ *)
 exception NoReturn of Ast.Id.t
 
 (* MultipleDeclaration x is raised when x is declared more than once in a
-* block.
-*)
+ * block.
+ *)
 exception MultipleDeclaration of Ast.Id.t
 
 (* UnboundVariable x is raised when x is used but not declared.
-*)
+ *)
 exception UnboundVariable of Ast.Id.t
 
 (* UndefinedFunction f is raised when f is called but has not been defined.
-*)
+ *)
 exception UndefinedFunction of Ast.Id.t
 
 (* TypeError s is raised when an operator or function is applied to operands
-* of the incorrect type.  s is any (hopefuly useful) message.
-*)
+ * of the incorrect type.  s is any (hopefuly useful) message.
+ *)
 exception TypeError of string
 
 (* Raised when public output depends on private input.
-*)
+ *)
 exception SecurityError
 
 
 (* Values.
  *)
- module PrimValue = struct
+module PrimValue = struct
   type t = 
     | V_Undefined
     | V_None
