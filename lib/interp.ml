@@ -39,7 +39,7 @@ module PrimValue = struct
     | V_Int of int
     | V_Bool of bool
     | V_Str of string
-    [@@deriving show]
+    (* [@@deriving show] *)
 
   (* to_string v = a string representation of v (more human-readable than
    * `show`.
@@ -60,7 +60,7 @@ end
 module SecLab = struct
 
   type t = Low | High
-  [@@deriving show]
+  (* [@@deriving show] *)
 
   let to_string (lambda: t) : string =
     match lambda with
@@ -72,6 +72,11 @@ module SecLab = struct
     | (Low, Low) -> Low
     | (High, _) -> High
     | (_, High) -> High
+
+  let less_or_equal (lambda: t) (lambda': t) : bool = 
+    match (lambda, lambda') with 
+    | (High, Low) -> false
+    | (_) -> true
 end
 
 module Value = struct
@@ -91,6 +96,8 @@ module Value = struct
   let update_sec_lab (v_sec : t) (lambda : SecLab.t) : t = 
     let v_prim = get_v_prim v_sec in
     (v_prim, get_max_lab v_sec lambda)
+
+  (* let return_nsu (v_sec : t) :  *)
 
   (* let assign_sec_lab (_) (lambda) *)
 
@@ -166,7 +173,7 @@ module Io = struct
    *
    * This is really ugly; there must be a better way.
    *)
-  let api : (PrimValue.t list -> PrimValue.t) IdMap.t =
+   let api : (PrimValue.t list -> PrimValue.t) IdMap.t =
     [
       ("print_bool", fun vs ->
         match vs with
@@ -344,8 +351,8 @@ module Env = struct
   (* pp fmtr rho : pretty-print rho to `fmtr`. We don't use this directly, it
   * is just needed for `ppx_deriving` in `EnvBlock.t`.
   *)
-  let pp (fmtr : Format.formatter) (rho : t) : unit=
-    Format.fprintf fmtr "%s" (to_string rho)
+  (* let pp (fmtr : Format.formatter) (rho : t) : unit=
+    Format.fprintf fmtr "%s" (to_string rho) *)
 
   (* empty = [].
   *)
@@ -373,19 +380,29 @@ module Env = struct
   *)
   let reset (rho : t) (x : Ast.Id.t) (v : Value.t) : t =
     (* TODO: add no-sensitive upgrade rule here *)
+    (* NOTE dont need sec_context here, since sec_context of v already eval'd *)
     if IdMap.mem x rho
-    then IdMap.add x v rho
+    then 
+      let lambda_old = Value.get_sec_lab (IdMap.find x rho) in
+      if (SecLab.less_or_equal (Value.get_sec_lab v) lambda_old)
+      then IdMap.add x v rho 
+      else raise @@ SecurityError
+
+(* 
+      | (SecLab.Low, SecLab.Low) -> IdMap.add x v rho
+      | (SecLab.High, SecLab.High) -> IdMap.add x v rho
+      | (SecLab.Low, SecLab.High) -> raise @@ SecurityError
+      | (SecLab.High, SecLab.Low) -> IdMap.add x (Value.update_sec_lab v SecLab.High) rho *)
     else raise Not_found
 
   (* declare rho x v = rho [x→v]
   *
   * Raises: MultipleDeclaration if x in dom rho.
   *)
-  let declare (rho : t) (x : Ast.Id.t) (v : Value.t) : t =
-    (* TODO: raise secError when eval-ing in high security state *)
-    if IdMap.mem x rho
+  let declare (rho : t) (sec_context : SecLab.t) (x : Ast.Id.t) (v : Value.t) : t =
+    if IdMap.mem x rho (* 'mem' doesn't care about vals, only cares about keys *)
     then raise @@ MultipleDeclaration x
-    else IdMap.add x v rho
+    else IdMap.add x (Value.update_sec_lab v sec_context) rho
   end
 
 
@@ -403,7 +420,7 @@ module EnvBlock = struct
   * possibly empty lists of environments; that is all handled here.
   *)
   type t = Env.t * (Env.t list)
-  [@@deriving show]
+  (* [@@deriving show] *)
     
   (* empty = [{}]
   *)
@@ -460,6 +477,8 @@ module EnvBlock = struct
   * Raises UnboundVariable if x not in dom rho_i for any i.
   *)
   let rec reset ((rho, rhos) : t) (x : Ast.Id.t) (v : Value.t) : t =
+    (* has 4 let stms, then do let l = get_max(s0, s1, context)
+    move calculation into let stms, put vars down  *)
     try (Env.reset rho x v, rhos)
     with
       | Not_found ->
@@ -471,8 +490,8 @@ module EnvBlock = struct
   *
   * Raises: MultipleDeclaration if x in dom rho_0.
   *)
-let declare ((rho, rhos) : t) (x : Ast.Id.t) (v : Value.t) : t =
-  (Env.declare rho x v, rhos)
+let declare ((rho, rhos) : t) (sec_context : SecLab.t) (x : Ast.Id.t) (v : Value.t) : t =
+  (Env.declare rho sec_context x v, rhos)
 end
 
 module Frame= struct
@@ -485,12 +504,13 @@ module Frame= struct
     (* NOTE how does this propagate down? 
     lets say an expr is eval'd under secerrframe, then does the expr eval to secerrval? 
     or do i raise SecurityError?  *)
-    | SecErrFrame
-  [@@deriving show]
+    (* | SecErrFrame *)
+  (* [@@deriving show] *)
 
   (* A base environment block frame.
   *)
   let base : t = Envs EnvBlock.empty
+
 
   (* from_list bindings = Envs (EnvBlock.from_list bindings)
   *)
@@ -510,7 +530,7 @@ module Frame= struct
     match eta with
     | Envs eta -> EnvBlock.lookup eta x
     | Return _ -> Failures.impossible "Frame.lookup (Return _)"
-    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+    (* | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)" *)
 
   (* reset eta x v = Envs [rho_0; ...; rho_i[x→v]; ...]
   *
@@ -521,7 +541,7 @@ module Frame= struct
     match eta with
     | Envs rhos -> Envs (EnvBlock.reset rhos x v)
     | Return _ -> Failures.impossible "Frame.reset (Return _)"
-    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+    (* | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)" *)
   
 
   (* declare eta x v = Envs [rho_0[x→v]; rho_1; ...]
@@ -529,11 +549,11 @@ module Frame= struct
   * Raises: Failures.impossible if eta is a return frame.
   * Raises: MultipleDeclaration if x in dom rho_0.
   *)
-  let declare (eta : t) (x : Ast.Id.t) (v : Value.t) : t =
+  let declare (eta : t) (sec_context : SecLab.t) (x : Ast.Id.t) (v : Value.t) : t =
     match eta with
-    | Envs rhos -> Envs (EnvBlock.declare rhos x v)
+    | Envs rhos -> Envs (EnvBlock.declare rhos sec_context x v)
     | Return _ -> Failures.impossible "Frame.declare (Return _)"
-    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+    (* | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)" *)
 
 
   (* push eta = Envs (Env.empty :: rhos).
@@ -543,7 +563,7 @@ module Frame= struct
     match eta with
     | Envs rhos -> Envs (EnvBlock.push Env.empty rhos)
     | Return _ -> Failures.impossible "Frame.push (Return _)"
-    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+    (* | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)" *)
     
 (* pop eta = Envs rhos, where eta = Envs (rho :: rhos).
   * pop (Return _): raises Failure
@@ -552,8 +572,10 @@ module Frame= struct
     match eta with
     | Envs rhos -> Envs (EnvBlock.pop rhos)
     | Return _ -> Failures.impossible "Frame.pop (Return _)"
-    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+    (* | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)" *)
 
+
+    (* let return_nsu (v_sec : Value.t) : Frame.t *)
 end
 
 
@@ -581,11 +603,10 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   let unop (op : Ast.Expr.unop) (sec_context : SecLab.t) (v : Value.t) : Value.t =
       (* need function to return the int with the unop applied to the print, and the sec val and the sec_context 
       (check op sems to confirm) *)
-      let s = Value.get_sec_lab v in
-      let n = Value.get_v_prim v in
-      match (op, n) with
-      | (Neg, PrimValue.V_Int n) -> Value.(PrimValue.V_Int(-n), SecLab.get_max(sec_context , s))
-      | (Not, PrimValue.V_Bool b) -> Value.(PrimValue.V_Bool(not b), SecLab.get_max(sec_context , s))
+      let sec_context' = Value.get_max_lab v sec_context in
+      match (op, Value. get_v_prim v) with
+      | (Neg, PrimValue.V_Int n) -> (PrimValue.V_Int (-n), sec_context')
+      | (Not, PrimValue.V_Bool b) -> (PrimValue.V_Bool (not b), sec_context')
       | _ -> raise @@ TypeError (
         Printf.sprintf "Bad operand types: %s %s"
         (Ast.Expr.show_unop op) (PrimValue.to_string n)
@@ -599,63 +620,98 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
     (* need function to return the int with the unop applied to the print, 
     and the max sec val of all the vals and the sec_context 
       (check op sems to confirm) *)
-    let n = Value.get_v_prim v in 
-    let n' = Value.get_v_prim v' in 
-    let s = Value.get_sec_lab v in
-    let s' = Value.get_sec_lab v' in
-      match (op, n, n') with
-      | (Plus, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n + n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) ) 
-      | (Minus, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n - n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Times, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n * n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Div, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n / n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Mod, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n mod n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (And, PrimValue.V_Bool n, PrimValue.V_Bool n') -> Value.(PrimValue.V_Bool( n && n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Or, PrimValue.V_Bool n, PrimValue.V_Bool n') -> Value.(PrimValue.V_Bool(n || n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Eq, n, n') -> Value.(PrimValue.V_Bool(n = n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Ne, n, n') -> Value.(PrimValue.V_Bool(n <> n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Lt, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n < n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Le, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n <= n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Gt, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n > n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | (Ge, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n >= n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
-      | _ -> raise @@ TypeError (
-        Printf.sprintf "Bad operand types: %s %s %s"
-        (Value.to_string v) (Ast.Expr.show_binop op) (Value.to_string v')
-      )
-
+    let sec_context' = Value.get_max_lab v (Value.get_max_lab v' sec_context) in 
+    match (op, Value.get_v_prim v, Value.get_v_prim v') with
+    | (Plus, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Int (n + n'), sec_context')
+    | (Minus,PrimValue.V_Int n,PrimValue.V_Int n') ->  (PrimValue.V_Int (n - n'), sec_context')
+    | (Times,PrimValue.V_Int n,PrimValue.V_Int n') ->  (PrimValue.V_Int (n * n'), sec_context')
+    | (Div, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Int (n / n'), sec_context')
+    | (Mod, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Int (n mod n'), sec_context')
+    | (And, PrimValue.V_Bool b, PrimValue.V_Bool b') ->  (PrimValue.V_Bool (b && b'), sec_context')
+    | (Or, PrimValue.V_Bool b, PrimValue.V_Bool b') ->  (PrimValue.V_Bool (b || b'), sec_context')
+    | (Eq, v, v') ->  (V_Bool (v = v'), sec_context')
+    | (Ne, v, v') ->  (V_Bool (v <> v'), sec_context')
+    | (Lt, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Bool (n < n'), sec_context')
+    | (Le, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Bool (n <= n'), sec_context')
+    | (Gt, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Bool (n > n'), sec_context')
+    | (Ge, PrimValue.V_Int n, PrimValue.V_Int n') ->  (PrimValue.V_Bool (n >= n'), sec_context')
+    | _ -> raise @@ TypeError (
+      Printf.sprintf "Bad operand types: %s %s %s"
+      (Value.to_string v) (Ast.Expr.show_binop op) (Value.to_string v')
+    )
   in
   
   (* eval eta e = v, where eta |- e ↓ v.
   *)
-  let rec eval (eta : Frame.t) (sec_context : SecLab.t) (e : Ast.Expr.t) : Value.t =
-  (*in (* TODO REMOVE THIS IN *)*)
+
+  let rec eval (rhos : EnvBlock.t) (sec_context : SecLab.t) (e : Ast.Expr.t) : Value.t =
     match e with
     | Var x -> 
       (* need function in Value.t that when get v_sec = eta(x), evals to new sec_context v_sec. this is easy, just take max *)
-      let v_sec_x = Frame.lookup eta x in
+      let v_sec_x = EnvBlock.lookup rhos x in
       Value.update_sec_lab v_sec_x sec_context
     | Num n -> (PrimValue.V_Int n, sec_context)
-    | Bool b -> (PrimValue.V_Bool n, sec_context)
-    | Str s -> (PrimValue.V_Str n, sec_context)
+    | Bool b -> (PrimValue.V_Bool b, sec_context)
+    | Str s -> (PrimValue.V_Str s, sec_context)
     | Unop (op, e) ->
-      unop op sec_context (eval eta e)
+      unop op sec_context (eval rhos sec_context e)
     | Binop (op, e, e') ->
-      binop op sec_context (eval eta e) (eval eta e')
+      binop op sec_context (eval rhos sec_context e) (eval rhos sec_context e')
     | Call(f, es) ->
       try
         let (params, body) : (Ast.Id.t list)*(Ast.Stm.t list) = find_def f in
-        let eta : Frame.t =
-          Frame.from_list @@ List.combine params (List.map (eval eta) es) in
+        let rhos' : EnvBlock.t =
+          EnvBlock.from_list @@ List.combine params (List.map (eval rhos sec_context) es) in
         begin
-          match exec_stms eta body with
-
+          match exec_stms rhos' sec_context body with
           | Envs _ -> raise @@ NoReturn f
-          | Return v -> v
+          (* | SecErrFrame -> raise @@ SecurityError *)
+          | Return v -> v 
+          (* would be redundant to check if this v was low, since if it got through a return stm in exec_stm it must be low  *)
         end
       with
         | Invalid_argument _ -> raise @@ TypeError "Incorrect number of arguments for call"
     | Not_found ->
       try
-        Io.do_call f (List.map (eval eta) es)
+        let args = List.map (eval rhos sec_context) es in
+        (* let prim_args = List.map Value.get_v_prim args in *)
+        let args_sec_contexts = List.map Value.get_sec_lab args in 
+        (* let sec_context' = List.fold_left SecLab.get_max sec_context args_sec_contexts in  *)
+        let prim_args = List.map Value.get_v_prim args in
+        begin
+        try
+          let (arg_policies, ret_policy) = Io.get_policy f in
+
+          let args_ok = List.for_all2 SecLab.less_or_equal args_sec_contexts arg_policies in
+              if not args_ok then
+                raise SecurityError;
+
+            (* Ensure the current security context is compatible with the return policy *)
+            if not (SecLab.less_or_equal ret_policy sec_context) then
+              raise SecurityError;
+          let result_prim = Io.do_call f prim_args in
+          (result_prim, ret_policy)
+        with
+      | Io.No_policy f ->
+          (* Handle undefined policy: Allow permissive behavior or fail gracefully *)
+          (* Example: Assume Low return level for undefined functions *)
+          let result = Io.do_call f prim_args in
+          (result, SecLab.Low)
+      | Io.ApiError _ ->
+          raise (UndefinedFunction f)
+        end
+
+
+(* 
+        if sec_context' = SecLab.Low 
+          then let _ = print_string (SecLab.to_string sec_context') in
+            raise @@ SecurityError
+          then (Io.do_call f prim_args, sec_context')
+      else 
+        let _ = print_string (SecLab.to_string sec_context') in
+        raise @@ SecurityError *)
+      
+
       with
         | Io.ApiError _ -> raise (UndefinedFunction f)
       
@@ -671,77 +727,112 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   * environment in eta for some variable in `decs`.
   *)
   and do_decs
-      (eta : Frame.t)
-      (decs : (Ast.Id.t * Ast.Expr.t option) list) : Frame.t =
+      (rhos : EnvBlock.t)
+      (sec_context : SecLab.t) 
+      (decs : (Ast.Id.t * Ast.Expr.t option) list) : EnvBlock.t =
     match decs with
-    | [] -> eta
+    | [] -> rhos
     | (x, None) :: decs ->
-      let eta' = Frame.declare eta x V_Undefined in
-        do_decs eta' decs
+      let rhos' = EnvBlock.declare (rhos) sec_context x (V_Undefined, sec_context) in
+        do_decs rhos' sec_context decs
     | (x, Some e) :: decs ->
-      let v = eval eta e in
-      let eta' = Frame.declare eta x v in
-        do_decs eta' decs
+      let v = eval rhos sec_context e in
+      let rhos' = EnvBlock.declare rhos sec_context x v in
+        do_decs rhos' sec_context decs
   
-  (* exec_stm eta stm = eta', where stm |- eta → eta'.
+
+  (* exec_stm rhos stm = eta, where stm |- rhos → eta.
   *)
-  and exec_stm (eta : Frame.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t =
+  (* and exec_stm (rhos : Frame.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t = *)
+  and exec_stm (rhos : EnvBlock.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t =
     match stm with
-    | VarDec decs -> do_decs eta decs
+    | VarDec decs -> Frame.Envs (do_decs rhos sec_context decs)
     | Assign(x, e) ->
-      let v = eval eta e in
-        Frame.reset eta x v
+      let v = eval rhos sec_context e in
+        Frame.Envs (EnvBlock.reset rhos x v) (* TODO implement NSU in reset *)
     | Expr e ->
-      let _ = eval eta e in
-        eta
+      let _ = eval rhos sec_context e in
+        Frame.Envs rhos
     | Block ss ->
-      let eta' = Frame.push eta in
+      let rhos' = (EnvBlock.push Env.empty rhos) in
+      (* TODO is exec_stms supposed to return a tuple with the sec_context? 
+      may need to implement NSU here and only allow return when in low sec context.
+      may need to re-eval sec context for return v regardless (but with nsu just raise error if its low?) 
+      which rules does NSU change?  *)
       begin
-        match exec_stms eta' ss with
+        match exec_stms rhos' sec_context ss with
+        (* here, eval new sec context, then re-eval return stm and pass it back in to exec_stm to follow operational semantics *)
         | Return v -> Return v
-        | eta'' -> Frame.pop eta''
+        (* already checks in exec_stms and returns sec_error there *)
+        | Envs rhos'' -> 
+          Frame.Envs (EnvBlock.pop rhos'')
+        (* | _ -> raise @@ TypeError "help" *)
+        (* | Frame.SecErrFrame -> Failures.impossible "sef" *)
       end
     | IfElse(e, s0, s1) ->
-      let v = eval eta e in
+      let v = eval rhos sec_context e in
+      let sec_context' = Value.get_sec_lab v in (* get updated sec context of v after evaluation *)
+      let v_prim = Value.get_v_prim v in 
       begin
-        match v with
-        | Value.V_Bool true -> exec_stm (Frame.push eta) (Block [s0])
-        | Value.V_Bool false -> exec_stm (Frame.push eta) (Block [s1])
+        match v_prim with
+        | PrimValue.V_Bool true -> exec_stm (EnvBlock.push Env.empty rhos) sec_context' (Block [s0])
+        | PrimValue.V_Bool false -> exec_stm (EnvBlock.push Env.empty rhos) sec_context' (Block [s1])
         | _ -> raise @@ TypeError ("Conditional test not a boolean value: " ^ Value.to_string v)
       end
-    | While(e, body) ->
-  
-      (* dowhile eta = eta', where while e do body |- eta → eta'.
+     | While(e, body) ->
+      (* dowhile rhos = eta, where while e do body |- rhos → eta.
       *)
-      let rec dowhile (eta : Frame.t) : Frame.t =
-        let v = eval eta e in
-        match v with
-        | Value.V_Bool false -> eta
-        | Value.V_Bool true ->
-          begin
-            match exec_stm eta (Block [body]) with
-            | Frame.Return v -> Frame.Return v
-            | eta' -> dowhile eta'
-          end
-        | _ -> raise @@ TypeError ("While test not a boolean value: " ^ Value.to_string v)
+      let rec dowhile (rhos : EnvBlock.t) (sec_context : SecLab.t) : Frame.t =
+        let v = eval rhos sec_context e in
+        let sec_context' = SecLab.get_max (Value.get_sec_lab v) sec_context in (* get updated sec context of v after evaluation *)
+        let v_prim = Value.get_v_prim v in 
+        begin
+          match v_prim with
+          | PrimValue.V_Bool false -> Frame.Envs rhos
+          | PrimValue.V_Bool true ->
+            begin
+              match exec_stm rhos sec_context' (Block [body]) with
+              | Frame.Return v -> Frame.Return v
+              | Frame.Envs rhos' -> dowhile rhos' sec_context'
+              (* | _ -> raise @@ TypeError "unimplemented" *)
+              (* | eta' -> dowhile eta' sec_context' *)
+            end
+          | _ -> raise @@ TypeError ("While test not a boolean value: " ^ Value.to_string v)
+        end
       in
-      dowhile eta
+      dowhile rhos sec_context
+
     | Return (Some e) ->
-      let v = eval eta e in
-      Frame.Return v
+      (* implement NSU *)
+      let v = eval rhos sec_context e in
+      begin
+        match Value.get_sec_lab v with
+        | SecLab.Low -> Frame.Return v 
+        | SecLab.High -> raise @@ SecurityError
+      end
+      
     | Return None ->
-      Frame.Return Value.V_None
-  
-  (* exec_stms eta stms = eta', where stms |- eta → eta'.
+      (* implement NSU *)
+      begin
+        match sec_context with 
+        | SecLab.Low -> Frame.Return (PrimValue.V_None, sec_context) (* is there a prettier way of doing this? *)
+        | SecLab.High -> raise @@ SecurityError
+      end
+    
+    (* | _ -> raise @@ Failures.impossible "help" *)
+      
+  (* exec_stms rhos stms = eta, where stms |- rhos → eta.
   *)
-  and exec_stms (eta : Frame.t) (sec_context : SecLab.t) (stms : Ast.Stm.t list) : Frame.t =
+  and exec_stms (rhos : EnvBlock.t) (sec_context : SecLab.t) (stms : Ast.Stm.t list) : Frame.t =
     match stms with
-    | [] -> eta
+    | [] -> Frame.Envs rhos
     | stm :: stms ->
-      match exec_stm eta stm with
-      | Return v -> Return v
-      | eta -> exec_stms eta stms
+      begin
+        match exec_stm rhos sec_context stm with
+        | Return v -> Return v
+        | Envs rhos' -> exec_stms rhos' sec_context stms
+      end
   in
 
-  let _ = eval Frame.base SecLab.Low (Call("main", [])) in
+  let _ = eval EnvBlock.empty SecLab.Low (Call("main", [])) in
   ()
