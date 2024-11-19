@@ -8,7 +8,7 @@
 !/lib/interp.ml
 !/lib/versions
 !/lib/versions/project2_solutions.ml
-!/lib/versions/inter_starter.ml
+!/lib/versions/interp_starter.ml
 !/test
 !/test/suites
 !/test/suites/90lobster
