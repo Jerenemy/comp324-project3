@@ -581,12 +581,14 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   let unop (op : Ast.Expr.unop) (sec_context : SecLab.t) (v : Value.t) : Value.t =
       (* need function to return the int with the unop applied to the print, and the sec val and the sec_context 
       (check op sems to confirm) *)
-      match (op, v) with
-      | (Neg, V_Int n) -> V_Int (-n)
-      | (Not, V_Bool b) -> V_Bool (not b)
+      let s = Value.get_sec_lab v in
+      let n = Value.get_v_prim v in
+      match (op, n) with
+      | (Neg, PrimValue.V_Int n) -> Value.(PrimValue.V_Int(-n), SecLab.get_max(sec_context , s))
+      | (Not, PrimValue.V_Bool b) -> Value.(PrimValue.V_Bool(not b), SecLab.get_max(sec_context , s))
       | _ -> raise @@ TypeError (
         Printf.sprintf "Bad operand types: %s %s"
-        (Ast.Expr.show_unop op) (Value.to_string v)
+        (Ast.Expr.show_unop op) (PrimValue.to_string n)
         )
   in
   
@@ -597,30 +599,35 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
     (* need function to return the int with the unop applied to the print, 
     and the max sec val of all the vals and the sec_context 
       (check op sems to confirm) *)
-    match (op, v, v') with
-    | (Plus, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n + n')
-    | (Minus, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n - n')
-    | (Times, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n * n')
-    | (Div, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n / n')
-    | (Mod, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n mod n')
-    | (And, Value.V_Bool b, Value.V_Bool b') -> Value.V_Bool (b && b')
-    | (Or, Value.V_Bool b, Value.V_Bool b') -> Value.V_Bool (b || b')
-    | (Eq, v, v') -> Value.V_Bool (v = v')
-    | (Ne, v, v') -> Value.V_Bool (v <> v')
-    | (Lt, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n < n')
-    | (Le, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n <= n')
-    | (Gt, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n > n')
-    | (Ge, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n >= n')
-    | _ -> raise @@ TypeError (
-      Printf.sprintf "Bad operand types: %s %s %s"
-      (Value.to_string v) (Ast.Expr.show_binop op) (Value.to_string v')
-    )
+    let n = Value.get_v_prim v in 
+    let n' = Value.get_v_prim v' in 
+    let s = Value.get_sec_lab v in
+    let s' = Value.get_sec_lab v' in
+      match (op, n, n') with
+      | (Plus, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n + n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) ) 
+      | (Minus, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n - n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Times, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n * n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Div, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n / n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Mod, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Int(n mod n') , SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (And, PrimValue.V_Bool n, PrimValue.V_Bool n') -> Value.(PrimValue.V_Bool( n && n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Or, PrimValue.V_Bool n, PrimValue.V_Bool n') -> Value.(PrimValue.V_Bool(n || n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Eq, n, n') -> Value.(PrimValue.V_Bool(n = n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Ne, n, n') -> Value.(PrimValue.V_Bool(n <> n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Lt, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n < n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Le, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n <= n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Gt, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n > n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | (Ge, PrimValue.V_Int n, PrimValue.V_Int n') -> Value.(PrimValue.V_Bool(n >= n'), SecLab.get_max( sec_context , SecLab.get_max(s,s') ) )
+      | _ -> raise @@ TypeError (
+        Printf.sprintf "Bad operand types: %s %s %s"
+        (Value.to_string v) (Ast.Expr.show_binop op) (Value.to_string v')
+      )
+
   in
   
   (* eval eta e = v, where eta |- e ↓ v.
   *)
   let rec eval (eta : Frame.t) (sec_context : SecLab.t) (e : Ast.Expr.t) : Value.t =
-  in (* TODO REMOVE THIS IN *)
+  (*in (* TODO REMOVE THIS IN *)*)
     match e with
     | Var x -> 
       (* need function in Value.t that when get v_sec = eta(x), evals to new sec_context v_sec. this is easy, just take max *)
