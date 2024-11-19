@@ -345,7 +345,7 @@ module Env = struct
     rho |> IdMap.to_list
     |> List.map (
       fun (id, v) -> id ^ ": " ^ Value.to_string v
-    )
+    ) 
     |> String.concat ", "
 
   (* pp fmtr rho : pretty-print rho to `fmtr`. We don't use this directly, it
@@ -665,7 +665,6 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
         begin
           match exec_stms rhos' sec_context body with
           | Envs _ -> raise @@ NoReturn f
-          (* | SecErrFrame -> raise @@ SecurityError *)
           | Return v -> v 
           (* would be redundant to check if this v was low, since if it got through a return stm in exec_stm it must be low  *)
         end
@@ -674,26 +673,24 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
     | Not_found ->
       try
         let args = List.map (eval rhos sec_context) es in
-        (* let prim_args = List.map Value.get_v_prim args in *)
         let args_sec_contexts = List.map Value.get_sec_lab args in 
-        (* let sec_context' = List.fold_left SecLab.get_max sec_context args_sec_contexts in  *)
         let prim_args = List.map Value.get_v_prim args in
         begin
         try
           let (arg_policies, ret_policy) = Io.get_policy f in
-
           let args_ok = List.for_all2 SecLab.less_or_equal args_sec_contexts arg_policies in
               if not args_ok then
                 raise SecurityError;
-
-            (* Ensure the current security context is compatible with the return policy *)
-            if not (SecLab.less_or_equal ret_policy sec_context) then
+            (* check that the current security context is compatible with the return policy *)
+            if not (SecLab.less_or_equal sec_context ret_policy) then
+              
               raise SecurityError;
           let result_prim = Io.do_call f prim_args in
-          (result_prim, ret_policy)
+          (result_prim, ret_policy) 
+          (* does the sec context get updated here? *)
         with
       | Io.No_policy f ->
-          (* Handle undefined policy: Allow permissive behavior or fail gracefully *)
+          (* Handle undefined policy*)
           (* Example: Assume Low return level for undefined functions *)
           let result = Io.do_call f prim_args in
           (result, SecLab.Low)
@@ -743,7 +740,6 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
 
   (* exec_stm rhos stm = eta, where stm |- rhos → eta.
   *)
-  (* and exec_stm (rhos : Frame.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t = *)
   and exec_stm (rhos : EnvBlock.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t =
     match stm with
     | VarDec decs -> Frame.Envs (do_decs rhos sec_context decs)
@@ -755,7 +751,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
         Frame.Envs rhos
     | Block ss ->
       let rhos' = (EnvBlock.push Env.empty rhos) in
-      (* TODO is exec_stms supposed to return a tuple with the sec_context? 
+      (* TODO 
       may need to implement NSU here and only allow return when in low sec context.
       may need to re-eval sec context for return v regardless (but with nsu just raise error if its low?) 
       which rules does NSU change?  *)
@@ -766,8 +762,6 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
         (* already checks in exec_stms and returns sec_error there *)
         | Envs rhos'' -> 
           Frame.Envs (EnvBlock.pop rhos'')
-        (* | _ -> raise @@ TypeError "help" *)
-        (* | Frame.SecErrFrame -> Failures.impossible "sef" *)
       end
     | IfElse(e, s0, s1) ->
       let v = eval rhos sec_context e in
@@ -794,8 +788,6 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
               match exec_stm rhos sec_context' (Block [body]) with
               | Frame.Return v -> Frame.Return v
               | Frame.Envs rhos' -> dowhile rhos' sec_context'
-              (* | _ -> raise @@ TypeError "unimplemented" *)
-              (* | eta' -> dowhile eta' sec_context' *)
             end
           | _ -> raise @@ TypeError ("While test not a boolean value: " ^ Value.to_string v)
         end
@@ -815,11 +807,10 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
       (* implement NSU *)
       begin
         match sec_context with 
-        | SecLab.Low -> Frame.Return (PrimValue.V_None, sec_context) (* is there a prettier way of doing this? *)
+        | SecLab.Low -> Frame.Return (PrimValue.V_None, sec_context)
         | SecLab.High -> raise @@ SecurityError
       end
     
-    (* | _ -> raise @@ Failures.impossible "help" *)
       
   (* exec_stms rhos stms = eta, where stms |- rhos → eta.
   *)
