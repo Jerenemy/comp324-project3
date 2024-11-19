@@ -12,3 +12,5 @@
 !/test/suites
 !/test/suites/90lobster
 !/test/suites/90lobster/*
+!/test/suites/10dynsec
+!/test/suites/10dynsec/*
