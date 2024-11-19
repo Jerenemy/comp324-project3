@@ -6,11 +6,14 @@
 !README.md
 !/lib
 !/lib/interp.ml
-!/lib/project2_solutions.ml
-!/lib/interp_starter.ml
+!/lib/versions
+!/lib/versions/project2_solutions.ml
+!/lib/versions/inter_starter.ml
 !/test
 !/test/suites
 !/test/suites/90lobster
 !/test/suites/90lobster/*
 !/test/suites/10dynsec
 !/test/suites/10dynsec/*
+
+# dit con me may

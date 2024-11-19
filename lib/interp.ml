@@ -32,7 +32,7 @@ exception SecurityError
 
 (* Values.
  *)
- module PrimValue = struct
+module PrimValue = struct
   type t = 
     | V_Undefined
     | V_None
@@ -62,6 +62,40 @@ module SecLab = struct
   type t = Low | High
   [@@deriving show]
 
+  let to_string (lambda: t) : string =
+    match lambda with
+    | Low -> "*low*"
+    | High -> "*high*"
+
+  let get_max (lambda: t) (lambda': t) : t =
+    match (lambda, lambda') with
+    | (Low, Low) -> Low
+    | (High, _) -> High
+    | (_, High) -> High
+end
+
+module Value = struct
+  type t = PrimValue.t * SecLab.t
+
+  let get_sec_lab (v_sec : t) : SecLab.t = 
+    match v_sec with 
+    | (_, lambda) -> lambda
+
+  let get_v_prim (v_sec : t) : PrimValue.t = 
+    match v_sec with 
+    | (v, _) -> v 
+  
+  let get_max_lab(v_sec : t) (lambda : SecLab.t) : SecLab.t = 
+    SecLab.get_max (get_sec_lab(v_sec)) lambda
+
+  let update_sec_lab (v_sec : t) (lambda : SecLab.t) : t = 
+    let v_prim = get_v_prim v_sec in
+    (v_prim, get_max_lab v_sec lambda)
+
+  (* let assign_sec_lab (_) (lambda) *)
+
+  let to_string (v_sec : t) : string = 
+    "(" ^ PrimValue.to_string(get_v_prim(v_sec)) ^ ", " ^  SecLab.to_string(get_sec_lab(v_sec)) ^ ")"
 end
 
 
@@ -285,19 +319,25 @@ end
 * of pairs in documentation. We will use ￿ as a metavariable over
 * environments.
 *)
-module Env= struct
-  module IdMap= Map.Make(Ast.Id)
+
+(* Environments. An environment is a finite map from identifiers to values.
+* We will interchangeably treat environments as functions or sets or lists
+* of pairs in documentation. We will use ￿ as a metavariable over
+* environments.
+*)
+module Env = struct
+  module IdMap = Map.Make(Ast.Id)
   
   (* The type of environments.
   *)
-  type t = PrimValue.t IdMap.t
+  type t = Value.t IdMap.t
   
   (* to_string rho = a string representation of rho.
   *)
   let to_string (rho : t) : string=
     rho |> IdMap.to_list
     |> List.map (
-      fun (id, v) -> id ^ ": " ^ PrimValue.to_string v
+      fun (id, v) -> id ^ ": " ^ Value.to_string v
     )
     |> String.concat ", "
 
@@ -317,21 +357,22 @@ module Env= struct
   *
   * Pre-condition: for any x, there is at most one pair (x, _) rho bindings.
   *)
-  let from_list : (Ast.Id.t*PrimValue.t) list -> t =
+  let from_list : (Ast.Id.t*Value.t) list -> t =
     IdMap.of_list
 
   (* lookup rho x = rho(x).
   *
   * Raises: Not_found if x not in dom rho.
   *)
-  let lookup (rho : t) (x : Ast.Id.t) : PrimValue.t =
+  let lookup (rho : t) (x : Ast.Id.t) : Value.t =
     IdMap.find x rho
 
   (* reset rho x v = rho [x → v].
   *
   * Raises: Not_found if x not in dom rho.
   *)
-  let reset (rho : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+  let reset (rho : t) (x : Ast.Id.t) (v : Value.t) : t =
+    (* TODO: add no-sensitive upgrade rule here *)
     if IdMap.mem x rho
     then IdMap.add x v rho
     else raise Not_found
@@ -340,7 +381,8 @@ module Env= struct
   *
   * Raises: MultipleDeclaration if x in dom rho.
   *)
-  let declare (rho : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+  let declare (rho : t) (x : Ast.Id.t) (v : Value.t) : t =
+    (* TODO: raise secError when eval-ing in high security state *)
     if IdMap.mem x rho
     then raise @@ MultipleDeclaration x
     else IdMap.add x v rho
@@ -350,7 +392,7 @@ module Env= struct
 (* An environment block, which we think of as a non-empty list of
 * environments representing block nesting in C-.
 *)
-module EnvBlock= struct
+module EnvBlock = struct
   (* A type for non-empty lists. The value (rho, rhos) represents what we think
   * of as rho :: rhos. In documentation, when we want to refer to "cons" for
   * values of type `t`, we'll write `:::`.
@@ -381,7 +423,7 @@ module EnvBlock= struct
   
   (* from_list bindings = [Env.from_list bindings].
   *)
-  let from_list (bindings : (Ast.Id.t*PrimValue.t) list) : t =
+  let from_list (bindings : (Ast.Id.t*Value.t) list) : t =
     (Env.from_list bindings, [])
   
   (* split [rho_0; rho_1; ...; rho_{n-1}] = (rho_0, [rho_1; ...; rho_{n-1}]).
@@ -399,7 +441,7 @@ module EnvBlock= struct
   *
   * Raises UnboundVariable if there is no rho in rhos with x in dom rho.
   *)
-  let rec lookup ((rho, rhos) : t) (x : Ast.Id.t) : PrimValue.t =
+  let rec lookup ((rho, rhos) : t) (x : Ast.Id.t) : Value.t =
     try Env.lookup rho x
     with
       | Not_found ->
@@ -417,7 +459,7 @@ module EnvBlock= struct
   *
   * Raises UnboundVariable if x not in dom rho_i for any i.
   *)
-  let rec reset ((rho, rhos) : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+  let rec reset ((rho, rhos) : t) (x : Ast.Id.t) (v : Value.t) : t =
     try (Env.reset rho x v, rhos)
     with
       | Not_found ->
@@ -429,7 +471,7 @@ module EnvBlock= struct
   *
   * Raises: MultipleDeclaration if x in dom rho_0.
   *)
-let declare ((rho, rhos) : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+let declare ((rho, rhos) : t) (x : Ast.Id.t) (v : Value.t) : t =
   (Env.declare rho x v, rhos)
 end
 
@@ -439,7 +481,11 @@ module Frame= struct
   *)
   type t =
     | Envs of EnvBlock.t
-    | Return of PrimValue.t
+    | Return of Value.t
+    (* NOTE how does this propagate down? 
+    lets say an expr is eval'd under secerrframe, then does the expr eval to secerrval? 
+    or do i raise SecurityError?  *)
+    | SecErrFrame
   [@@deriving show]
 
   (* A base environment block frame.
@@ -448,7 +494,7 @@ module Frame= struct
 
   (* from_list bindings = Envs (EnvBlock.from_list bindings)
   *)
-  let from_list (bindings : (Ast.Id.t*PrimValue.t) list) : t =
+  let from_list (bindings : (Ast.Id.t*Value.t) list) : t =
     Envs (EnvBlock.from_list bindings)
 
   (* lookup eta x = v, where eta = Envs [rho_0; ...; rho_{n-1}], rho_i(x) = v, and
@@ -457,33 +503,38 @@ module Frame= struct
   * I.e., lookup eta x = rho_i(x), where rho_i is the first environment in eta with
   * x in its domain.
   *
-  * Raises: impossible if eta is a return frame.
+  * Raises: Failures.impossible if eta is a return frame.
   * Raises UnboundVariable if x not in dom rho_i for any i.
   *)
-  let lookup (eta : t) (x : Ast.Id.t) : PrimValue.t =
+  let lookup (eta : t) (x : Ast.Id.t) : Value.t =
     match eta with
     | Envs eta -> EnvBlock.lookup eta x
     | Return _ -> Failures.impossible "Frame.lookup (Return _)"
+    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
 
   (* reset eta x v = Envs [rho_0; ...; rho_i[x→v]; ...]
   *
-  * Raises: impossible if eta is a return frame.
+  * Raises: Failures.impossible if eta is a return frame.
   * Raises UnboundVariable if x not in any rho_i.
   *)
-  let reset (eta : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+  let reset (eta : t) (x : Ast.Id.t) (v : Value.t) : t =
     match eta with
     | Envs rhos -> Envs (EnvBlock.reset rhos x v)
     | Return _ -> Failures.impossible "Frame.reset (Return _)"
+    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+  
 
   (* declare eta x v = Envs [rho_0[x→v]; rho_1; ...]
   *
-  * Raises: impossible if eta is a return frame.
+  * Raises: Failures.impossible if eta is a return frame.
   * Raises: MultipleDeclaration if x in dom rho_0.
   *)
-  let declare (eta : t) (x : Ast.Id.t) (v : PrimValue.t) : t =
+  let declare (eta : t) (x : Ast.Id.t) (v : Value.t) : t =
     match eta with
     | Envs rhos -> Envs (EnvBlock.declare rhos x v)
     | Return _ -> Failures.impossible "Frame.declare (Return _)"
+    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+
 
   (* push eta = Envs (Env.empty :: rhos).
   * push (Return _): raises Failure.
@@ -492,6 +543,7 @@ module Frame= struct
     match eta with
     | Envs rhos -> Envs (EnvBlock.push Env.empty rhos)
     | Return _ -> Failures.impossible "Frame.push (Return _)"
+    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
     
 (* pop eta = Envs rhos, where eta = Envs (rho :: rhos).
   * pop (Return _): raises Failure
@@ -500,6 +552,8 @@ module Frame= struct
     match eta with
     | Envs rhos -> Envs (EnvBlock.pop rhos)
     | Return _ -> Failures.impossible "Frame.pop (Return _)"
+    | SecErrFrame -> Failures.impossible "Frame.lookup (SecErrFrame _)"
+
 end
 
 
@@ -514,6 +568,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   * Raises: Not_found if f is not defined in the source program.
   *)
   let find_def (f : Ast.Id.t) : (Ast.Id.t list)*(Ast.Stm.t list) =
+    (* TODO: may need to add context in here too *)
     let 
       FunDef(_, params, body) = List.find (fun (Ast.Prog.FunDef(f', _, _)) -> f' = f) fundefs 
     in
@@ -523,52 +578,61 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   (* unop op v = v', where v' is the result of applying the metalanguage
   * operation corresponding to `op` to `v`.
   *)
-  let unop (op : Ast.Expr.unop) (v : PrimValue.t) : PrimValue.t =
-    match (op, v) with
-    | (Neg, V_Int n) -> V_Int (-n)
-    | (Not, V_Bool b) -> V_Bool (not b)
-    | _ -> raise @@ TypeError (
-      Printf.sprintf "Bad operand types: %s %s"
-      (Ast.Expr.show_unop op) (PrimValue.to_string v)
-      )
+  let unop (op : Ast.Expr.unop) (sec_context : SecLab.t) (v : Value.t) : Value.t =
+      (* need function to return the int with the unop applied to the print, and the sec val and the sec_context 
+      (check op sems to confirm) *)
+      match (op, v) with
+      | (Neg, V_Int n) -> V_Int (-n)
+      | (Not, V_Bool b) -> V_Bool (not b)
+      | _ -> raise @@ TypeError (
+        Printf.sprintf "Bad operand types: %s %s"
+        (Ast.Expr.show_unop op) (Value.to_string v)
+        )
   in
   
   (* binop op v v' = the result of applying the metalanguage operation
   * corresponding to `op` to v and v'.
   *)
-  let binop (op : Ast.Expr.binop) (v : PrimValue.t) (v' : PrimValue.t) : PrimValue.t =
+  let binop (op : Ast.Expr.binop) (sec_context : SecLab.t) (v : Value.t) (v' : Value.t) : Value.t =
+    (* need function to return the int with the unop applied to the print, 
+    and the max sec val of all the vals and the sec_context 
+      (check op sems to confirm) *)
     match (op, v, v') with
-    | (Plus, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Int (n + n')
-    | (Minus, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Int (n - n')
-    | (Times, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Int (n * n')
-    | (Div, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Int (n / n')
-    | (Mod, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Int (n mod n')
-    | (And, PrimValue.V_Bool b, PrimValue.V_Bool b') -> PrimValue.V_Bool (b && b')
-    | (Or, PrimValue.V_Bool b, PrimValue.V_Bool b') -> PrimValue.V_Bool (b || b')
-    | (Eq, v, v') -> PrimValue.V_Bool (v = v')
-    | (Ne, v, v') -> PrimValue.V_Bool (v <> v')
-    | (Lt, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Bool (n < n')
-    | (Le, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Bool (n <= n')
-    | (Gt, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Bool (n > n')
-    | (Ge, PrimValue.V_Int n, PrimValue.V_Int n') -> PrimValue.V_Bool (n >= n')
+    | (Plus, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n + n')
+    | (Minus, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n - n')
+    | (Times, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n * n')
+    | (Div, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n / n')
+    | (Mod, Value.V_Int n, Value.V_Int n') -> Value.V_Int (n mod n')
+    | (And, Value.V_Bool b, Value.V_Bool b') -> Value.V_Bool (b && b')
+    | (Or, Value.V_Bool b, Value.V_Bool b') -> Value.V_Bool (b || b')
+    | (Eq, v, v') -> Value.V_Bool (v = v')
+    | (Ne, v, v') -> Value.V_Bool (v <> v')
+    | (Lt, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n < n')
+    | (Le, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n <= n')
+    | (Gt, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n > n')
+    | (Ge, Value.V_Int n, Value.V_Int n') -> Value.V_Bool (n >= n')
     | _ -> raise @@ TypeError (
       Printf.sprintf "Bad operand types: %s %s %s"
-      (PrimValue.to_string v) (Ast.Expr.show_binop op) (PrimValue.to_string v')
-    ) 
+      (Value.to_string v) (Ast.Expr.show_binop op) (Value.to_string v')
+    )
   in
   
   (* eval eta e = v, where eta |- e ↓ v.
-*)
-  let rec eval (eta : Frame.t) (e : Ast.Expr.t) : PrimValue.t =
+  *)
+  let rec eval (eta : Frame.t) (sec_context : SecLab.t) (e : Ast.Expr.t) : Value.t =
+  in (* TODO REMOVE THIS IN *)
     match e with
-    | Var x -> Frame.lookup eta x
-    | Num n -> PrimValue.V_Int n
-    | Bool b -> PrimValue.V_Bool b
-    | Str s -> PrimValue.V_Str s
+    | Var x -> 
+      (* need function in Value.t that when get v_sec = eta(x), evals to new sec_context v_sec. this is easy, just take max *)
+      let v_sec_x = Frame.lookup eta x in
+      Value.update_sec_lab v_sec_x sec_context
+    | Num n -> (PrimValue.V_Int n, sec_context)
+    | Bool b -> (PrimValue.V_Bool n, sec_context)
+    | Str s -> (PrimValue.V_Str n, sec_context)
     | Unop (op, e) ->
-      unop op (eval eta e)
+      unop op sec_context (eval eta e)
     | Binop (op, e, e') ->
-      binop op (eval eta e) (eval eta e')
+      binop op sec_context (eval eta e) (eval eta e')
     | Call(f, es) ->
       try
         let (params, body) : (Ast.Id.t list)*(Ast.Stm.t list) = find_def f in
@@ -576,6 +640,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
           Frame.from_list @@ List.combine params (List.map (eval eta) es) in
         begin
           match exec_stms eta body with
+
           | Envs _ -> raise @@ NoReturn f
           | Return v -> v
         end
@@ -586,6 +651,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
         Io.do_call f (List.map (eval eta) es)
       with
         | Io.ApiError _ -> raise (UndefinedFunction f)
+      
   
   (* do_decs eta [..., (x, Some e), ...] = eta'', where eta'' is obtained by adding
   * x → v to eta', where eta' |- e ↓ v.
@@ -612,7 +678,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
   
   (* exec_stm eta stm = eta', where stm |- eta → eta'.
   *)
-  and exec_stm (eta : Frame.t) (stm : Ast.Stm.t) : Frame.t =
+  and exec_stm (eta : Frame.t) (sec_context : SecLab.t) (stm : Ast.Stm.t) : Frame.t =
     match stm with
     | VarDec decs -> do_decs eta decs
     | Assign(x, e) ->
@@ -632,9 +698,9 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
       let v = eval eta e in
       begin
         match v with
-        | PrimValue.V_Bool true -> exec_stm (Frame.push eta) (Block [s0])
-        | PrimValue.V_Bool false -> exec_stm (Frame.push eta) (Block [s1])
-        | _ -> raise @@ TypeError ("Conditional test not a boolean value: " ^ PrimValue.to_string v)
+        | Value.V_Bool true -> exec_stm (Frame.push eta) (Block [s0])
+        | Value.V_Bool false -> exec_stm (Frame.push eta) (Block [s1])
+        | _ -> raise @@ TypeError ("Conditional test not a boolean value: " ^ Value.to_string v)
       end
     | While(e, body) ->
   
@@ -643,25 +709,25 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
       let rec dowhile (eta : Frame.t) : Frame.t =
         let v = eval eta e in
         match v with
-        | PrimValue.V_Bool false -> eta
-        | PrimValue.V_Bool true ->
+        | Value.V_Bool false -> eta
+        | Value.V_Bool true ->
           begin
             match exec_stm eta (Block [body]) with
             | Frame.Return v -> Frame.Return v
             | eta' -> dowhile eta'
           end
-        | _ -> raise @@ TypeError ("While test not a boolean value: " ^ PrimValue.to_string v)
+        | _ -> raise @@ TypeError ("While test not a boolean value: " ^ Value.to_string v)
       in
       dowhile eta
     | Return (Some e) ->
       let v = eval eta e in
       Frame.Return v
     | Return None ->
-      Frame.Return PrimValue.V_None
+      Frame.Return Value.V_None
   
   (* exec_stms eta stms = eta', where stms |- eta → eta'.
   *)
-  and exec_stms (eta : Frame.t) (stms : Ast.Stm.t list) : Frame.t =
+  and exec_stms (eta : Frame.t) (sec_context : SecLab.t) (stms : Ast.Stm.t list) : Frame.t =
     match stms with
     | [] -> eta
     | stm :: stms ->
@@ -670,5 +736,5 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
       | eta -> exec_stms eta stms
   in
 
-  let _ = eval Frame.base (Call("main", [])) in
+  let _ = eval Frame.base SecLab.Low (Call("main", [])) in
   ()
