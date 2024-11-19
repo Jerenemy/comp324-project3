@@ -554,7 +554,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
     | _ -> raise @@ TypeError (
       Printf.sprintf "Bad operand types: %s %s %s"
       (PrimValue.to_string v) (Ast.Expr.show_binop op) (PrimValue.to_string v')
-    )
+    ) 
   in
   
   (* eval eta e = v, where eta |- e ↓ v.
