@@ -609,7 +609,7 @@ let exec (Pgm fundefs : Ast.Prog.t) : unit=
       | (Not, PrimValue.V_Bool b) -> (PrimValue.V_Bool (not b), sec_context')
       | _ -> raise @@ TypeError (
         Printf.sprintf "Bad operand types: %s %s"
-        (Ast.Expr.show_unop op) (PrimValue.to_string n)
+        (Ast.Expr.show_unop op) (PrimValue.to_string (Value.get_v_prim v))
         )
   in
   
