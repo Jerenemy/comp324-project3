@@ -9,14 +9,17 @@
 
 #include "cminus.h"
 
+/*
 void f(x) {
     print_int(x);
     return ;
 }
+*/
 
 void main() {
     int x = get_int_s();
+    /*
     f(x);
-
+    */
     return ;
 }

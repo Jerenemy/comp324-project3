@@ -16,7 +16,7 @@
 
 void main() {
     bool b = get_bool_s();
-    bool c = get_bool():
+    bool c = get_bool();
     int x = 0;
     if (b) {
         x = 5;

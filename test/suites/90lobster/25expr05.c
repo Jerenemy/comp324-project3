@@ -12,7 +12,7 @@
 void main() {
     int x = get_string_s();
 
-    print_int(x)
+    print_int(x);
 
     return ;
 }

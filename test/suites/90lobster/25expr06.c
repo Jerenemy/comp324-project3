@@ -12,7 +12,7 @@
 void main() {
     int x = get_int_s();
 
-    print_int(x+1)
+    print_int(x+1);
 
     return ;
 }
