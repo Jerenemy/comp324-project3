@@ -8,30 +8,30 @@
  * 
  * {
  *      "input":    ["1","false"],
- *      "output":   ["1"]
+ *       "exception":  "SecurityError"
  * }
  * 
  */
 
 #include "cminus.h"
 
-/*
-void f(x,y) {
+
+int f(int x,bool y) {
     if (y) {
         print_int(x);
     }
     else print_int(x);
-    return ;
+    return 0;
 }
-*/
+
 
 void main() {
     int x = get_int();
     bool y = get_bool_s();
 
-    /*
+    
     f(x,y);
-    */
+    
 
     return ;
 }

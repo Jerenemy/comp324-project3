@@ -7,7 +7,7 @@
  *
  * {
  *      "input":    ["false"],
- *      "output":   ["0"]
+ *      "exception":   "SecurityError"
  * }
  *
  */
